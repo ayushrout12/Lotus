@@ -112,11 +112,66 @@ export function getHtmlPages(project) {
     });
 }
 
+/**
+ * Repair common model-output mistakes before a generated page is passed to the
+ * preview iframe. This is deliberately conservative: it only unwraps markdown,
+ * extracts an accidentally nested HTML file block, and normalizes JSX/module
+ * script tags so EditableHtmlPreview can rewrite imports before Babel executes.
+ */
+function sanitizeHtmlPreview(value, pageKey) {
+  if (typeof value !== "string") return "";
+  let html = value.replace(/^\uFEFF/, "").trim();
+
+  // Some responses accidentally save the entire multi-file answer as index.html.
+  // Extract the requested HTML block instead of rendering the file markers/code.
+  if (/---FILE:/i.test(html)) {
+    const nested = extractFileBlocks(html);
+    const preferred = nested.find((file) => file.path === pageKey)
+      || nested.find((file) => /(^|\/)index\.html?$/i.test(file.path))
+      || nested.find((file) => /\.html?$/i.test(file.path));
+    if (preferred?.content) html = preferred.content.trim();
+  }
+
+  // Remove a single outer markdown fence such as ```html ... ```.
+  const fenced = html.match(/^```(?:html?|jsx?|tsx?)?\s*\n([\s\S]*?)\n```\s*$/i);
+  if (fenced) html = fenced[1].trim();
+
+  // Remove stray fence lines that otherwise become visible text in the page.
+  html = html
+    .replace(/^```(?:html?|jsx?|tsx?)?\s*$/gim, "")
+    .replace(/^```\s*$/gim, "")
+    .trim();
+
+  // Browser Babel can compile JSX only after EditableHtmlPreview has rewritten
+  // ES imports. Normalize the common script types to the type its rewriter scans.
+  html = html.replace(
+    /<script\b([^>]*?)\btype=["'](?:module|text\/(?:jsx|tsx|javascript|typescript))["']([^>]*)>/gi,
+    '<script$1type="text/babel"$2>'
+  );
+
+  // Generated pages sometimes omit a type even though the inline body contains
+  // imports or JSX. Mark only those inline scripts; never alter external scripts.
+  html = html.replace(
+    /<script(?![^>]*\bsrc=)(?![^>]*\btype=)([^>]*)>([\s\S]*?)<\/script>/gi,
+    (full, attrs, body) => {
+      const looksLikeModule = /(^|\n)\s*(?:import\s|export\s)/m.test(body);
+      const looksLikeJsx = /<[A-Z][A-Za-z0-9]*(?:\s|>|\/)/.test(body)
+        || /return\s*\(\s*</.test(body);
+      return looksLikeModule || looksLikeJsx
+        ? `<script${attrs} type="text/babel">${body}</script>`
+        : full;
+    }
+  );
+
+  return html;
+}
+
 export function getHtmlPreviewContent(project, page = null) {
   if (!project?.files || typeof project.files !== "object") return "";
 
   const htmlPages = getHtmlPages(project);
   const pageKey = page || htmlPages[0] || "index.html";
+  const value = project.files[pageKey];
 
-  return typeof project.files[pageKey] === "string" ? project.files[pageKey] : "";
+  return sanitizeHtmlPreview(value, pageKey);
 }
