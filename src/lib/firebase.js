@@ -5,6 +5,8 @@ import { getFirestore } from 'firebase/firestore';
 export function isFirebaseConfigured() {
   return !!(
     import.meta.env.VITE_FIREBASE_API_KEY &&
+    import.meta.env.VITE_FIREBASE_AUTH_DOMAIN &&
+    import.meta.env.VITE_FIREBASE_APP_ID &&
     import.meta.env.VITE_FIREBASE_PROJECT_ID
   );
 }

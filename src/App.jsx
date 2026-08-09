@@ -20,7 +20,7 @@ import ShareModal from './components/ShareModal';
 import SettingsModal from './components/SettingsModal';
 import { hasUserApiKey } from './apiKey.js';
 import { useAuth } from './contexts/AuthContext';
-import { listProjects, listSharedWithMe, getProject, deleteProject } from './lib/projects';
+import { createProject, updateProject, listProjects, listSharedWithMe, getProject, deleteProject } from './lib/projects';
 import { pageTransition } from './lib/animations';
 
 const EASE = [0.22, 1, 0.36, 1];
@@ -1314,6 +1314,19 @@ function App() {
         files: Object.fromEntries(result.files.map((file) => [file.path, file.content])),
       });
       setGeneratedHTML(result.fullText);
+      if (firebaseConfigured && user) {
+        const files = Object.fromEntries(result.files.map((file) => [file.path, file.content]));
+        const projectId = await createProject(user.uid, {
+          name: userMessage.slice(0, 58) || 'Untitled Lotus project',
+          prompt: userMessage,
+          provider,
+          gatewayModel: selectedModel,
+          chatMessages: [{ role: 'user', content: userMessage }, { role: 'assistant', content: result.fullText }],
+          files,
+        });
+        setCurrentProjectId(projectId);
+        refreshProjects();
+      }
     } catch (err) {
       setError(err.message);
     } finally {
@@ -1419,6 +1432,29 @@ function App() {
         files: Object.fromEntries(result.files.map((file) => [file.path, file.content])),
       });
       setGeneratedHTML(result.fullText);
+      if (firebaseConfigured && user) {
+        const files = Object.fromEntries(result.files.map((file) => [file.path, file.content]));
+        const savedMessages = [...chatMessages, { role: 'user', content: msg }, { role: 'assistant', content: result.fullText }];
+        if (currentProjectId) {
+          await updateProject(currentProjectId, {
+            provider,
+            gatewayModel: selectedModel,
+            chatMessages: savedMessages,
+            files,
+          });
+        } else {
+          const projectId = await createProject(user.uid, {
+            name: (prompt || msg).slice(0, 58) || 'Untitled Lotus project',
+            prompt: prompt || msg,
+            provider,
+            gatewayModel: selectedModel,
+            chatMessages: savedMessages,
+            files,
+          });
+          setCurrentProjectId(projectId);
+        }
+        refreshProjects();
+      }
     } catch (err) {
       setError(err.message);
       setChatMessages((prev) => prev.slice(0, -1));

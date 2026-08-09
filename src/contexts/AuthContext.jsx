@@ -5,6 +5,8 @@ import {
   signOut as firebaseSignOut,
   onAuthStateChanged,
   signInWithPopup,
+  signInWithRedirect,
+  getRedirectResult,
   GoogleAuthProvider,
 } from 'firebase/auth';
 import { auth, isFirebaseConfigured } from '../lib/firebase';
@@ -24,6 +26,9 @@ export function AuthProvider({ children }) {
       setUser(u);
       setLoading(false);
     });
+    getRedirectResult(auth).catch((error) => {
+      console.warn('[Lotus] Google redirect sign-in failed:', error?.code || error?.message);
+    });
     return () => unsub();
   }, []);
 
@@ -36,7 +41,21 @@ export function AuthProvider({ children }) {
   };
 
   const signInWithGoogle = async () => {
-    await signInWithPopup(auth, new GoogleAuthProvider());
+    if (!auth) throw new Error('Firebase authentication is not configured.');
+    const provider = new GoogleAuthProvider();
+    provider.setCustomParameters({ prompt: 'select_account' });
+    try {
+      await signInWithPopup(auth, provider);
+    } catch (error) {
+      if (
+        error?.code === 'auth/popup-blocked' ||
+        error?.code === 'auth/operation-not-supported-in-this-environment'
+      ) {
+        await signInWithRedirect(auth, provider);
+        return;
+      }
+      throw error;
+    }
   };
 
   const signOut = async () => {
